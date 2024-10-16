@@ -41,7 +41,10 @@ func Top10(source string) []string {
 		return false
 	})
 
-	return keys[:10]
+	if len(keys) > 10 {
+		return keys[:10]
+	}
+	return keys
 }
 
 func prepareString(source string) string {
