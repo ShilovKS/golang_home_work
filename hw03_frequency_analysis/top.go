@@ -1,69 +1,50 @@
 package hw03frequencyanalysis
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 )
 
-func Top10(source string) []string {
-	if isEmptyString(&source) {
-		return nil
+func Top10(input string) []string {
+	if input == "" {
+		return []string{}
 	}
 
-	cleanedText := prepareString(source)
+	// Разбиваем строку на слова, учитывая пробельные символы.
+	words := strings.Fields(input)
 
-	allWords := make(map[string]int)
-	split := strings.Fields(cleanedText)
+	// Подсчет слов.
+	wordCounts := make(map[string]int)
+	for _, word := range words {
+		wordCounts[word]++
+	}
 
-	for _, word := range split {
-		_, ok := allWords[word]
-		if ok {
-			allWords[word]++
-		} else {
-			allWords[word] = 1
+	// Сортировка слов по частоте и лексикографически.
+	type wordStat struct {
+		word  string
+		count int
+	}
+
+	stats := make([]wordStat, 0, len(wordCounts))
+	for word, count := range wordCounts {
+		stats = append(stats, wordStat{word, count})
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].count == stats[j].count {
+			return stats[i].word < stats[j].word
 		}
-	}
-
-	keys := make([]string, 0, len(allWords))
-
-	for key := range allWords {
-		keys = append(keys, key)
-	}
-
-	sort.Slice(keys, func(i, j int) bool {
-		if allWords[keys[i]] > allWords[keys[j]] {
-			return true
-		} else if allWords[keys[i]] == allWords[keys[j]] {
-			return keys[i] < keys[j]
-		}
-
-		return false
+		return stats[i].count > stats[j].count
 	})
 
-	if len(keys) > 10 {
-		return keys[:10]
+	// Выбираем топ-10 слов.
+	result := make([]string, 0, 10)
+	for i, stat := range stats {
+		if i >= 10 {
+			break
+		}
+		result = append(result, stat.word)
 	}
-	return keys
-}
 
-func prepareString(source string) string {
-	source = strings.ToLower(source)
-
-	source = regexp.MustCompile(`\s-\s`).ReplaceAllString(source, " ") // удаляем одиночные дефисы с пробелами
-	source = regexp.MustCompile(`-`).ReplaceAllString(source, "")      // удаляем оставшиеся одиночные дефисы
-
-	// Регулярное выражение для удаления знаков препинания после слова
-	re := regexp.MustCompile(`([a-zA-Zа-яА-ЯёЁ0-9\-]{2,})([.,!?;:]+)(\s)`)
-	cleanedText := re.ReplaceAllString(source, "$1$3") // сохраняем слово и пробел
-
-	// Удаляем любые оставшиеся знаки препинания
-	return regexp.MustCompile(`[.,!?;:]+`).ReplaceAllString(cleanedText, "")
-}
-
-func isEmptyString(s *string) bool {
-	if s == nil || *s == "" {
-		return true
-	}
-	return false
+	return result
 }
