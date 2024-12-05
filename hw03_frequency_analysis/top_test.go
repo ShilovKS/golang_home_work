@@ -80,3 +80,51 @@ func TestTop10(t *testing.T) {
 		}
 	})
 }
+
+func TestTop10Additional(t *testing.T) {
+	t.Run("only one word", func(t *testing.T) {
+		text := "word word word"
+		expected := []string{"word"}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("multiple words with equal frequency", func(t *testing.T) {
+		text := "dog cat bird dog cat bird"
+		expected := []string{"bird", "cat", "dog"}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("mixed frequencies", func(t *testing.T) {
+		text := "a a a b b c"
+		expected := []string{"a", "b", "c"}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		require.Len(t, Top10(""), 0)
+	})
+
+	t.Run("text with more than 10 unique words", func(t *testing.T) {
+		text := "a b c d e f g h i j k l"
+		expected := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("words with punctuation considered as unique", func(t *testing.T) {
+		text := "hello hello! hello, hello."
+		expected := []string{"hello", "hello!", "hello,", "hello."}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("case sensitivity", func(t *testing.T) {
+		text := "Hello hello HELLO"
+		expected := []string{"HELLO", "Hello", "hello"}
+		require.Equal(t, expected, Top10(text))
+	})
+
+	t.Run("input with hyphen as a word", func(t *testing.T) {
+		text := "a - - b b c c c"
+		expected := []string{"c", "-", "b", "a"}
+		require.Equal(t, expected, Top10(text))
+	})
+}
