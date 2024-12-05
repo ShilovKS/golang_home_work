@@ -80,6 +80,7 @@ func TestTop10(t *testing.T) {
 		}
 	})
 }
+
 func TestTop10Additional(t *testing.T) {
 	t.Run("only one word", func(t *testing.T) {
 		text := "word word word"
