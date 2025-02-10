@@ -1,51 +1,63 @@
 package hw10programoptimization
 
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
 	"io"
 	"strings"
+
+	jsoniter "github.com/json-iterator/go"
 )
 
+var json = jsoniter.Config{
+	EscapeHTML:             true,
+	SortMapKeys:            true,
+	ValidateJsonRawMessage: true,
+	CaseSensitive:          false,
+}.Froze()
+
 type User struct {
-	ID       int    `json:"Id"`
-	Name     string `json:"Name"`
-	Username string `json:"Username"`
-	Email    string `json:"Email"`
-	Phone    string `json:"Phone"`
-	Password string `json:"Password"`
-	Address  string `json:"Address"`
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+	Address  string `json:"address"`
 }
 
 type DomainStat map[string]int
 
 func GetDomainStat(r io.Reader, domain string) (DomainStat, error) {
-	stat := make(DomainStat)
-	dec := json.NewDecoder(r)
+	result := make(DomainStat)
+	scanner := bufio.NewScanner(r)
 	targetSuffix := "." + strings.ToLower(domain)
 
-	for {
-		var user User
-		err := dec.Decode(&user)
-		if err == io.EOF {
-			break
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
-		if err != nil {
+		var user User
+		if err := json.Unmarshal(line, &user); err != nil {
 			return nil, fmt.Errorf("get users error: %w", err)
 		}
-		// Обрабатываем email: находим символ '@'
+
 		email := user.Email
 		at := strings.LastIndex(email, "@")
 		if at < 0 || at >= len(email)-1 {
 			continue
 		}
 		domPart := email[at+1:]
-		// Если доменная часть (в нижнем регистре) оканчивается на "."+domain, увеличиваем счётчик.
 		if strings.HasSuffix(strings.ToLower(domPart), targetSuffix) {
 			key := strings.ToLower(domPart)
-			stat[key]++
+			result[key]++
 		}
 	}
 
-	return stat, nil
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
