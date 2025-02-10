@@ -1,60 +1,53 @@
 package hw09structvalidator
 
 import (
-	"encoding/json"
-	"fmt"
+	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-type UserRole string
+type User struct {
+	ID     string `validate:"len:36"`
+	Name   string
+	Age    int      `validate:"min:18|max:50"`
+	Email  string   `validate:"regexp:^\\w+@\\w+\\.\\w+$"`
+	Role   string   `validate:"in:admin,stuff"`
+	Phones []string `validate:"len:11"`
+}
 
-// Test the function on different structures and other types.
-type (
-	User struct {
-		ID     string `json:"id" validate:"len:36"`
-		Name   string
-		Age    int             `validate:"min:18|max:50"`
-		Email  string          `validate:"regexp:^\\w+@\\w+\\.\\w+$"`
-		Role   UserRole        `validate:"in:admin,stuff"`
-		Phones []string        `validate:"len:11"`
-		meta   json.RawMessage //nolint:unused
-	}
+func TestValidateUser(t *testing.T) {
+	t.Run("valid user", func(t *testing.T) {
+		u := User{
+			ID:     "012345678901234567890123456789012345",
+			Name:   "John Doe",
+			Age:    33,
+			Email:  "test@mail.ru",
+			Role:   "stuff",
+			Phones: []string{"12345678901"},
+		}
+		err := Validate(u)
+		require.NoError(t, err)
+	})
 
-	App struct {
-		Version string `validate:"len:5"`
-	}
-
-	Token struct {
-		Header    []byte
-		Payload   []byte
-		Signature []byte
-	}
-
-	Response struct {
-		Code int    `validate:"in:200,404,500"`
-		Body string `json:"omitempty"`
-	}
-)
-
-func TestValidate(t *testing.T) {
-	tests := []struct {
-		in          interface{}
-		expectedErr error
-	}{
-		{
-			// Place your code here.
-		},
-		// ...
-		// Place your code here.
-	}
-
-	for i, tt := range tests {
-		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
-			tt := tt
-			t.Parallel()
-
-			// Place your code here.
-			_ = tt
-		})
-	}
+	t.Run("user with errors", func(t *testing.T) {
+		u := User{
+			ID:     "0",
+			Name:   "Name",
+			Age:    0,
+			Email:  "invalid",
+			Role:   "none",
+			Phones: []string{"0"},
+		}
+		expected := ValidationErrors{
+			{Field: "ID", Err: NewErrStringLengthMismatch(36)},
+			{Field: "Age", Err: NewErrValueOutOfRange("greater", 18)},
+			{Field: "Email", Err: NewErrStringDoesNotMatchPattern("^\\w+@\\w+\\.\\w+$")},
+			{Field: "Role", Err: NewErrValueNotInSet("admin,stuff")},
+			{Field: "Phones", Err: NewErrStringLengthMismatch(11)},
+		}
+		err := Validate(u)
+		require.Error(t, err)
+		require.True(t, reflect.DeepEqual(expected, err))
+	})
 }
