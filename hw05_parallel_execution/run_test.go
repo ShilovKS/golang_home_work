@@ -12,59 +12,170 @@ import (
 	"go.uber.org/goleak"
 )
 
-func TestRun(t *testing.T) {
+// TestRunErrorsLimit проверяет, что если в первых M задачах произошли ошибки,
+// то общее число выполненных задач не превышает N+M.
+func TestRunErrorsLimit(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	t.Run("if were errors in first M tasks, than finished not more N+M tasks", func(t *testing.T) {
-		tasksCount := 50
-		tasks := make([]Task, 0, tasksCount)
+	tasksCount := 50
+	tasks := make([]Task, 0, tasksCount)
+	var runTasksCount int32
 
-		var runTasksCount int32
+	for i := 0; i < tasksCount; i++ {
+		// Каждая задача возвращает ошибку.
+		err := fmt.Errorf("error from task %d", i)
+		tasks = append(tasks, func() error {
+			// Симулируем случайную задержку.
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
+			atomic.AddInt32(&runTasksCount, 1)
+			return err
+		})
+	}
 
-		for i := 0; i < tasksCount; i++ {
-			err := fmt.Errorf("error from task %d", i)
+	workersCount := 10
+	maxErrorsCount := 23
+	err := Run(tasks, workersCount, maxErrorsCount)
+
+	require.Truef(t, errors.Is(err, ErrErrorsLimitExceeded), "actual error - %v", err)
+	// Допускается выполнение не более N+M задач.
+	require.LessOrEqual(t, runTasksCount, int32(workersCount+maxErrorsCount), "extra tasks were started")
+}
+
+// TestRunNoErrors проверяет, что если все задачи выполняются без ошибок,
+// то все они выполняются параллельно (общая длительность меньше суммы задержек).
+func TestRunNoErrors(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	tasksCount := 50
+	tasks := make([]Task, 0, tasksCount)
+	var runTasksCount int32
+	var sumSleepTime time.Duration
+
+	for i := 0; i < tasksCount; i++ {
+		taskSleep := time.Millisecond * time.Duration(rand.Intn(100))
+		sumSleepTime += taskSleep
+
+		tasks = append(tasks, func() error {
+			time.Sleep(taskSleep)
+			atomic.AddInt32(&runTasksCount, 1)
+			return nil
+		})
+	}
+
+	workersCount := 5
+	// maxErrorsCount здесь не влияет, так как ошибок нет.
+	maxErrorsCount := 1
+
+	start := time.Now()
+	err := Run(tasks, workersCount, maxErrorsCount)
+	elapsedTime := time.Since(start)
+	require.NoError(t, err)
+	require.Equal(t, int32(tasksCount), runTasksCount, "not all tasks were completed")
+	// Если задачи выполнялись бы последовательно, время было бы ~sumSleepTime.
+	// Проверяем, что оно существенно меньше.
+	require.LessOrEqual(t, int64(elapsedTime), int64(sumSleepTime/2), "tasks were run sequentially?")
+}
+
+// TestRunMNonPositive проверяет сценарий m <= 0.
+// В этой реализации m <= 0 трактуется как игнорирование ошибок:
+// функция должна вернуть nil, а все задачи выполниться.
+func TestRunMNonPositive(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	tasksCount := 50
+	tasks := make([]Task, 0, tasksCount)
+	var runTasksCount int32
+
+	for i := 0; i < tasksCount; i++ {
+		tasks = append(tasks, func() error {
+			atomic.AddInt32(&runTasksCount, 1)
+			return errors.New("error")
+		})
+	}
+
+	workersCount := 5
+	// При m <= 0 ошибки игнорируются – функция возвращает nil, а все задачи выполняются.
+	err := Run(tasks, workersCount, 0)
+	require.NoError(t, err, "no error expected when m <= 0")
+	require.Equal(t, int32(tasksCount), runTasksCount, "all tasks should be executed when m <= 0")
+}
+
+// TestRunSuccessfulTasks проверяет сценарий, когда количество ошибок меньше порогового значения m.
+// В этом случае все задачи должны выполниться, а функция вернуть nil.
+func TestRunSuccessfulTasks(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	tasksCount := 10
+	tasks := make([]Task, 0, tasksCount)
+	var runTasksCount int32
+
+	// Пусть только одна задача возвращает ошибку, остальные – успешно.
+	for i := 0; i < tasksCount; i++ {
+		if i == 5 {
 			tasks = append(tasks, func() error {
-				time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
 				atomic.AddInt32(&runTasksCount, 1)
-				return err
+				return errors.New("error")
 			})
-		}
-
-		workersCount := 10
-		maxErrorsCount := 23
-		err := Run(tasks, workersCount, maxErrorsCount)
-
-		require.Truef(t, errors.Is(err, ErrErrorsLimitExceeded), "actual err - %v", err)
-		require.LessOrEqual(t, runTasksCount, int32(workersCount+maxErrorsCount), "extra tasks were started")
-	})
-
-	t.Run("tasks without errors", func(t *testing.T) {
-		tasksCount := 50
-		tasks := make([]Task, 0, tasksCount)
-
-		var runTasksCount int32
-		var sumTime time.Duration
-
-		for i := 0; i < tasksCount; i++ {
-			taskSleep := time.Millisecond * time.Duration(rand.Intn(100))
-			sumTime += taskSleep
-
+		} else {
 			tasks = append(tasks, func() error {
-				time.Sleep(taskSleep)
 				atomic.AddInt32(&runTasksCount, 1)
 				return nil
 			})
 		}
+	}
 
-		workersCount := 5
-		maxErrorsCount := 1
+	workersCount := 3
+	maxErrorsCount := 3
+	err := Run(tasks, workersCount, maxErrorsCount)
+	require.NoError(t, err)
+	require.Equal(t, int32(tasksCount), runTasksCount, "not all tasks were executed")
+}
 
-		start := time.Now()
+// TestRunConcurrency проверяет, что задачи действительно выполняются параллельно без использования time.Sleep для имитации задержки.
+func TestRunConcurrency(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	tasksCount := 20
+	tasks := make([]Task, 0, tasksCount)
+	var currentConcurrent int32
+	var maxConcurrent int32
+	blockCh := make(chan struct{})
+
+	for i := 0; i < tasksCount; i++ {
+		tasks = append(tasks, func() error {
+			cur := atomic.AddInt32(&currentConcurrent, 1)
+			// Обновляем максимум одновременных задач.
+			for {
+				mx := atomic.LoadInt32(&maxConcurrent)
+				if cur > mx {
+					if atomic.CompareAndSwapInt32(&maxConcurrent, mx, cur) {
+						break
+					}
+				} else {
+					break
+				}
+			}
+			<-blockCh
+			atomic.AddInt32(&currentConcurrent, -1)
+			return nil
+		})
+	}
+
+	workersCount := 5
+	maxErrorsCount := 1
+
+	doneCh := make(chan error, 1)
+	go func() {
 		err := Run(tasks, workersCount, maxErrorsCount)
-		elapsedTime := time.Since(start)
-		require.NoError(t, err)
+		doneCh <- err
+	}()
 
-		require.Equal(t, runTasksCount, int32(tasksCount), "not all tasks were completed")
-		require.LessOrEqual(t, int64(elapsedTime), int64(sumTime/2), "tasks were run sequentially?")
-	})
+	// Проверяем, что в какой-то момент максимальное число одновременно выполняемых задач достигло количества воркеров.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&maxConcurrent) >= int32(workersCount)
+	}, time.Second, 10*time.Millisecond, "max concurrent tasks should be equal to workers count")
+
+	close(blockCh)
+	err := <-doneCh
+	require.NoError(t, err)
 }
