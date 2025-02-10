@@ -4,56 +4,63 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
-// User представляет пользователя.
-// Обратите внимание: имена полей (с учётом регистра) соответствуют входящему JSON.
 type User struct {
-	ID       int    `json:"Id"`
-	Name     string `json:"Name"`
-	Username string `json:"Username"`
-	Email    string `json:"Email"`
-	Phone    string `json:"Phone"`
-	Password string `json:"Password"`
-	Address  string `json:"Address"`
+	ID       int
+	Name     string
+	Username string
+	Email    string
+	Phone    string
+	Password string
+	Address  string
 }
 
-// DomainStat – статистика по доменам: ключ – доменная часть email, значение – количество.
 type DomainStat map[string]int
 
-// GetDomainStat читает данные из r (каждая строка – отдельный JSON-объект) и подсчитывает,
-// сколько раз встречается доменная часть email, если она заканчивается на "."+domain (без учёта регистра).
-//
-// В этой реализации мы используем json.Decoder для последовательного декодирования объектов,
-// что позволяет обрабатывать данные «на лету» без накопления всех пользователей в памяти.
 func GetDomainStat(r io.Reader, domain string) (DomainStat, error) {
-	stat := make(DomainStat)
-	dec := json.NewDecoder(r)
-	targetSuffix := "." + strings.ToLower(domain)
+	u, err := getUsers(r)
+	if err != nil {
+		return nil, fmt.Errorf("get users error: %w", err)
+	}
+	return countDomains(u, domain)
+}
 
-	for {
-		var user User
-		err := dec.Decode(&user)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("get users error: %w", err)
-		}
-		// Обрабатываем email: находим символ '@'
-		email := user.Email
-		at := strings.LastIndex(email, "@")
-		if at < 0 || at >= len(email)-1 {
-			continue
-		}
-		domPart := email[at+1:]
-		// Если доменная часть (в нижнем регистре) оканчивается на "."+domain, увеличиваем счётчик.
-		if strings.HasSuffix(strings.ToLower(domPart), targetSuffix) {
-			key := strings.ToLower(domPart)
-			stat[key]++
-		}
+type users [100_000]User
+
+func getUsers(r io.Reader) (result users, err error) {
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return
 	}
 
-	return stat, nil
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		var user User
+		if err = json.Unmarshal([]byte(line), &user); err != nil {
+			return
+		}
+		result[i] = user
+	}
+	return
+}
+
+func countDomains(u users, domain string) (DomainStat, error) {
+	result := make(DomainStat)
+
+	for _, user := range u {
+		matched, err := regexp.Match("\\."+domain, []byte(user.Email))
+		if err != nil {
+			return nil, err
+		}
+
+		if matched {
+			num := result[strings.ToLower(strings.SplitN(user.Email, "@", 2)[1])]
+			num++
+			result[strings.ToLower(strings.SplitN(user.Email, "@", 2)[1])] = num
+		}
+	}
+	return result, nil
 }
