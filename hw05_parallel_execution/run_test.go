@@ -3,13 +3,12 @@ package hw05parallelexecution
 import (
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 )
 
 // TestRunErrorsLimit проверяет, что если в первых M задачах произошли ошибки,
@@ -22,10 +21,8 @@ func TestRunErrorsLimit(t *testing.T) {
 	var runTasksCount int32
 
 	for i := 0; i < tasksCount; i++ {
-		// Каждая задача возвращает ошибку.
 		err := fmt.Errorf("error from task %d", i)
 		tasks = append(tasks, func() error {
-			// Симулируем случайную задержку.
 			time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
 			atomic.AddInt32(&runTasksCount, 1)
 			return err
@@ -37,8 +34,8 @@ func TestRunErrorsLimit(t *testing.T) {
 	err := Run(tasks, workersCount, maxErrorsCount)
 
 	require.Truef(t, errors.Is(err, ErrErrorsLimitExceeded), "actual error - %v", err)
-	// Допускается выполнение не более N+M задач.
-	require.LessOrEqual(t, runTasksCount, int32(workersCount+maxErrorsCount), "extra tasks were started")
+	// Используем атомарное чтение, чтобы избежать гонки:
+	require.LessOrEqual(t, atomic.LoadInt32(&runTasksCount), int32(workersCount+maxErrorsCount), "extra tasks were started")
 }
 
 // TestRunNoErrors проверяет, что если все задачи выполняются без ошибок,
@@ -70,15 +67,16 @@ func TestRunNoErrors(t *testing.T) {
 	err := Run(tasks, workersCount, maxErrorsCount)
 	elapsedTime := time.Since(start)
 	require.NoError(t, err)
-	require.Equal(t, int32(tasksCount), runTasksCount, "not all tasks were completed")
-	// Если задачи выполнялись бы последовательно, время было бы ~sumSleepTime.
+	// Читаем атомарно:
+	require.Equal(t, int32(tasksCount), atomic.LoadInt32(&runTasksCount), "not all tasks were completed")
+	// Если бы задачи выполнялись последовательно, время было бы ~sumSleepTime.
 	// Проверяем, что оно существенно меньше.
 	require.LessOrEqual(t, int64(elapsedTime), int64(sumSleepTime/2), "tasks were run sequentially?")
 }
 
 // TestRunMNonPositive проверяет сценарий m <= 0.
-// В этой реализации m <= 0 трактуется как игнорирование ошибок:
-// функция должна вернуть nil, а все задачи выполниться.
+// В данной реализации m <= 0 трактуется как "игнорировать ошибки" – функция возвращает nil,
+// а все задачи выполняются.
 func TestRunMNonPositive(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -94,10 +92,9 @@ func TestRunMNonPositive(t *testing.T) {
 	}
 
 	workersCount := 5
-	// При m <= 0 ошибки игнорируются – функция возвращает nil, а все задачи выполняются.
 	err := Run(tasks, workersCount, 0)
 	require.NoError(t, err, "no error expected when m <= 0")
-	require.Equal(t, int32(tasksCount), runTasksCount, "all tasks should be executed when m <= 0")
+	require.Equal(t, int32(tasksCount), atomic.LoadInt32(&runTasksCount), "all tasks should be executed when m <= 0")
 }
 
 // TestRunSuccessfulTasks проверяет сценарий, когда количество ошибок меньше порогового значения m.
@@ -128,10 +125,11 @@ func TestRunSuccessfulTasks(t *testing.T) {
 	maxErrorsCount := 3
 	err := Run(tasks, workersCount, maxErrorsCount)
 	require.NoError(t, err)
-	require.Equal(t, int32(tasksCount), runTasksCount, "not all tasks were executed")
+	require.Equal(t, int32(tasksCount), atomic.LoadInt32(&runTasksCount), "not all tasks were executed")
 }
 
-// TestRunConcurrency проверяет, что задачи действительно выполняются параллельно без использования time.Sleep для имитации задержки.
+// TestRunConcurrency проверяет, что задачи действительно выполняются параллельно,
+// без использования time.Sleep для имитации задержки.
 func TestRunConcurrency(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
