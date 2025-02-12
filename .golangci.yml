@@ -8,6 +8,17 @@ linters-settings:
   funlen:
     lines: 150
     statements: 80
+  depguard:
+    rules:
+      test:
+        allow:
+          - $gostd
+          - github.com/stretchr
+          - github.com/google/uuid
+          - github.com/ShilovKS/golang_home_work/hw12_13_14_15_calendar
+          - github.com/jmoiron/sqlx
+          - github.com/BurntSushi/toml
+          - github.com/lib/pq
 
 issues:
   exclude-rules:
@@ -17,13 +28,12 @@ issues:
         - dupl
         - gocyclo
         - gosec
-        - depguard
 
 linters:
   disable-all: true
   enable:
     - asciicheck
-#    - depguard
+    - depguard
     - dogsled
     - dupl
     - bodyclose

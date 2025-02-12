@@ -1,5 +1,17 @@
 [logger]
 level = "INFO"
 
-# TODO
-# ...
+[database]
+driver = "postgres"
+host = "localhost"
+port = 5432
+user = "postgres"
+password = "postgres"
+dbname = "calendar"
+sslmode = "disable"
+migrate = "migrations"
+mode = "sql"
+
+[server]
+host = "localhost"
+port = 8080
